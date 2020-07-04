@@ -79,15 +79,6 @@ Resources:
       Tags:
         - Key: Name
           Value: pri-sub-a-cf
-
-  DBSubnetGroup: 
-    Type: "AWS::RDS::DBSubnetGroup"
-    Properties: 
-      DBSubnetGroupName: "db-subnet"
-      DBSubnetGroupDescription: "-"
-      SubnetIds: 
-        - !Ref PriSub
-
   
   #EC2のセキュリティグループ
   EC2SG:
@@ -127,34 +118,44 @@ Resources:
           - Key: Name
             Value: ec2-a-cf
 
-  #RDSのセキュリティグループ
-  RDSSG:
+  #DBのセキュリティグループ
+  DBSG:
     Type: AWS::EC2::SecurityGroup
     Properties:
-      GroupName: rds-sg-cf
-      GroupDescription: Allow MYSQL access
+      GroupName: db-sg-cf
+      GroupDescription: Allow MYSQL and SSH access only MyIP
       VpcId: !Ref VPC
       SecurityGroupIngress:
-      - IpProtocol: tcp
-        FromPort: 3306
-        ToPort: 3306
+        # mysql
+        - IpProtocol: tcp
+          FromPort: 3306
+          ToPort: 3306
+          CidrIp: !Ref MyIP
+        # ssh
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: !Ref MyIP
   
-  RDS: 
-    Type: "AWS::RDS::DBInstance"
-    DeletionPolicy: Delete
-    Properties:
-      DBInstanceClass: "t2.small"
-      AllocatedStorage: 6
-      StorageType: gp2
-      DBSubnetGroupName: !Ref DBSubnetGroup
-      VPCSecurityGroups:
-      - !Ref RDSSG
-      Engine: MySQL
-      EngineVersion: 8.0.16
-      DBName: rds-cf
-      MasterUsername: master
-      MasterUserPassword: mup
-  
+  DB: 
+    Type: AWS::EC2::Instance
+    Properties: 
+      ImageId: ami-00d101850e971728d
+      KeyName: !Ref KeyName
+      InstanceType: t2.micro
+      NetworkInterfaces: 
+        - AssociatePublicIpAddress: "false"
+          DeviceIndex: "0"
+          SubnetId: !Ref PriSub
+          GroupSet:
+            - !Ref DBSG
+      UserData: !Base64 |
+        #!/bin/bash
+        yum install mysql-server
+        yum install mysql-devel
+      Tags:
+          - Key: Name
+            Value: db-a-cf
 
 Outputs:
   EC2PublicIP:
