@@ -1,0 +1,162 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Provision EC2
+
+Parameters: 
+  KeyName:
+    Description: The EC2 Key Pair to allow SSH access to the instance
+    Default: my-key
+    Type: String
+
+  MyIP:
+    Description: IP address allowed to access EC2
+    Default: 0.0.0.0/0
+    Type: String
+
+Resources:
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.0.0.0/16
+      Tags:
+        - Key: Name
+          Value: vpc-cf
+
+  IGW:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: igw-cf
+
+  # IGWをVPCにアタッチ
+  AttachGateway:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref VPC
+      InternetGatewayId: !Ref IGW
+
+  # パブリックサブネット
+  PubSub:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: ap-northeast-1a
+      VpcId: !Ref VPC
+      CidrBlock: 10.0.1.0/24
+      Tags:
+        - Key: Name
+          Value: pub-sub-a-cf
+
+  PubSubRT:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: pub-sub-a-rt-cf
+
+  # PubSub-インターネット間のルーティング
+  PubSubToInternet:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PubSubRT
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref IGW
+
+  # ルートテーブルをパブリックサブネットに関連付け
+  AssoPubSubRT:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PubSub
+      RouteTableId: !Ref PubSubRT
+  
+  # パブリックサブネット
+  PriSub:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: ap-northeast-1a
+      VpcId: !Ref VPC
+      CidrBlock: 10.0.2.0/24
+      Tags:
+        - Key: Name
+          Value: pri-sub-a-cf
+
+  DBSubnetGroup: 
+    Type: "AWS::RDS::DBSubnetGroup"
+    Properties: 
+      DBSubnetGroupName: "db-subnet"
+      DBSubnetGroupDescription: "-"
+      SubnetIds: 
+        - !Ref PriSub
+
+  
+  #EC2のセキュリティグループ
+  EC2SG:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: ec2-sg-cf
+      GroupDescription: Allow SSH and HTTP access only MyIP
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        # http
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: !Ref MyIP
+        # ssh
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: !Ref MyIP
+  
+  EC2: 
+    Type: AWS::EC2::Instance
+    Properties: 
+      ImageId: ami-00d101850e971728d
+      KeyName: !Ref KeyName
+      InstanceType: t2.micro
+      NetworkInterfaces: 
+        - AssociatePublicIpAddress: "true"
+          DeviceIndex: "0"
+          SubnetId: !Ref PubSub
+          GroupSet:
+            - !Ref EC2SG
+      UserData: !Base64 |
+        #!/bin/bash
+        sudo yum install -y git
+      Tags:
+          - Key: Name
+            Value: ec2-a-cf
+
+  #RDSのセキュリティグループ
+  RDSSG:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: rds-sg-cf
+      GroupDescription: Allow MYSQL access
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+      - IpProtocol: tcp
+        FromPort: 3306
+        ToPort: 3306
+  
+  RDS: 
+    Type: "AWS::RDS::DBInstance"
+    DeletionPolicy: Delete
+    Properties:
+      DBInstanceClass: "t2.small"
+      AllocatedStorage: 6
+      StorageType: gp2
+      DBSubnetGroupName: !Ref DBSubnetGroup
+      VPCSecurityGroups:
+      - !Ref RDSSG
+      Engine: MySQL
+      EngineVersion: 8.0.16
+      DBName: rds-cf
+      MasterUsername: master
+      MasterUserPassword: mup
+  
+
+Outputs:
+  EC2PublicIP:
+    Value: !GetAtt EC2.PublicIp
+    Description: Public IP of EC2 instance
